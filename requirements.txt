@@ -1,0 +1,13 @@
+neo4j==5.18.0
+qdrant-client==1.9.1
+google-generativeai==0.7.2
+requests==2.31.0
+python-dotenv==1.0.1
+tqdm==4.66.4
+sentence-transformers==3.0.1
+numpy==1.26.4
+flask==3.0.3
+flask-cors==4.0.1
+networkx==3.3
+pydantic==2.7.4
+tenacity==8.3.0

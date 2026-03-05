@@ -1,0 +1,1168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Layer10 — Memory Graph Explorer</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:        #0a0b0f;
+    --bg2:       #10131a;
+    --bg3:       #161b26;
+    --border:    #1e2535;
+    --border2:   #2a3348;
+    --text:      #c9d1e0;
+    --text2:     #6b7a99;
+    --text3:     #3d4f70;
+    --accent:    #4f9eff;
+    --accent2:   #7b5ea7;
+    --green:     #3ecf8e;
+    --red:       #f06292;
+    --yellow:    #ffd166;
+    --orange:    #ff8c42;
+
+    /* node colors */
+    --c-issue:     #4f9eff;
+    --c-person:    #3ecf8e;
+    --c-component: #ffd166;
+    --c-claim:     #b57bee;
+    --c-evidence:  #ff8c42;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    height: 100vh;
+    overflow: hidden;
+    display: grid;
+    grid-template-rows: 52px 1fr;
+    grid-template-columns: 300px 1fr 360px;
+    grid-template-areas:
+      "header header header"
+      "sidebar graph detail";
+  }
+
+  /* ── HEADER ─────────────────────────────────────────── */
+  header {
+    grid-area: header;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    gap: 24px;
+    z-index: 100;
+  }
+
+  .logo {
+    font-family: 'Syne', sans-serif;
+    font-weight: 800;
+    font-size: 17px;
+    color: #fff;
+    letter-spacing: -0.5px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .logo span {
+    color: var(--accent);
+  }
+  .logo-dot {
+    width: 8px; height: 8px;
+    background: var(--accent);
+    border-radius: 50%;
+    animation: pulse 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%       { opacity: 0.5; transform: scale(0.7); }
+  }
+
+  .search-bar {
+    flex: 1;
+    max-width: 600px;
+    display: flex;
+    align-items: center;
+    background: var(--bg3);
+    border: 1px solid var(--border2);
+    border-radius: 6px;
+    padding: 0 12px;
+    gap: 8px;
+    transition: border-color 0.2s;
+  }
+  .search-bar:focus-within { border-color: var(--accent); }
+  .search-bar input {
+    flex: 1;
+    background: none;
+    border: none;
+    outline: none;
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    padding: 8px 0;
+  }
+  .search-bar input::placeholder { color: var(--text3); }
+  .search-icon { color: var(--text3); font-size: 14px; }
+
+  .header-stats {
+    display: flex;
+    gap: 16px;
+    margin-left: auto;
+  }
+  .stat-pill {
+    font-size: 10px;
+    color: var(--text2);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .stat-pill .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+  }
+  .stat-pill.issues .dot  { background: var(--c-issue); }
+  .stat-pill.persons .dot { background: var(--c-person); }
+  .stat-pill.comps .dot   { background: var(--c-component); }
+  .stat-pill.claims .dot  { background: var(--c-claim); }
+
+  /* ── SIDEBAR ─────────────────────────────────────────── */
+  aside {
+    grid-area: sidebar;
+    background: var(--bg2);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .panel-header {
+    padding: 14px 16px 10px;
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--text3);
+    border-bottom: 1px solid var(--border);
+    font-weight: 500;
+  }
+
+  .filter-group {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .filter-label {
+    font-size: 10px;
+    color: var(--text3);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 8px;
+  }
+  .filter-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .filter-btn {
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-family: inherit;
+    cursor: pointer;
+    border: 1px solid var(--border2);
+    background: var(--bg3);
+    color: var(--text2);
+    transition: all 0.15s;
+  }
+  .filter-btn.active-issue     { background: rgba(79,158,255,0.15); border-color: var(--c-issue);     color: var(--c-issue); }
+  .filter-btn.active-person    { background: rgba(62,207,142,0.15); border-color: var(--c-person);    color: var(--c-person); }
+  .filter-btn.active-component { background: rgba(255,209,102,0.15);border-color: var(--c-component); color: var(--c-component); }
+  .filter-btn.active-claim     { background: rgba(181,123,238,0.15);border-color: var(--c-claim);     color: var(--c-claim); }
+
+  .slider-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 6px;
+  }
+  .slider-row label { font-size: 10px; color: var(--text3); min-width: 80px; }
+  .slider-row input[type=range] {
+    flex: 1;
+    accent-color: var(--accent);
+  }
+  .slider-val { font-size: 10px; color: var(--text2); min-width: 28px; text-align: right; }
+
+  .entity-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 0;
+  }
+  .entity-list::-webkit-scrollbar { width: 4px; }
+  .entity-list::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+  .entity-item {
+    padding: 8px 16px;
+    cursor: pointer;
+    display: flex;
+    align-items: flex-start;
+    gap: 9px;
+    transition: background 0.1s;
+    border-left: 2px solid transparent;
+  }
+  .entity-item:hover { background: var(--bg3); }
+  .entity-item.selected { background: var(--bg3); border-left-color: var(--accent); }
+
+  .entity-type-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    margin-top: 4px;
+    flex-shrink: 0;
+  }
+  .entity-name {
+    font-size: 11px;
+    color: var(--text);
+    line-height: 1.4;
+    word-break: break-word;
+  }
+  .entity-meta {
+    font-size: 10px;
+    color: var(--text3);
+    margin-top: 2px;
+  }
+
+  /* ── GRAPH ───────────────────────────────────────────── */
+  #graph-area {
+    grid-area: graph;
+    background: var(--bg);
+    position: relative;
+    overflow: hidden;
+  }
+
+  #graph-canvas { width: 100%; height: 100%; }
+
+  .graph-overlay {
+    position: absolute;
+    bottom: 16px;
+    left: 16px;
+    display: flex;
+    gap: 12px;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10px;
+    color: var(--text3);
+  }
+  .legend-dot { width: 8px; height: 8px; border-radius: 50%; }
+
+  .graph-controls {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .ctrl-btn {
+    width: 32px; height: 32px;
+    background: var(--bg2);
+    border: 1px solid var(--border2);
+    border-radius: 6px;
+    color: var(--text2);
+    font-size: 16px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+  }
+  .ctrl-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ── DETAIL PANEL ────────────────────────────────────── */
+  #detail-panel {
+    grid-area: detail;
+    background: var(--bg2);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .detail-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+  }
+  .tab {
+    flex: 1;
+    padding: 12px;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text3);
+    cursor: pointer;
+    text-align: center;
+    border-bottom: 2px solid transparent;
+    transition: all 0.15s;
+  }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab:hover:not(.active) { color: var(--text2); }
+
+  .detail-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+  }
+  .detail-content::-webkit-scrollbar { width: 4px; }
+  .detail-content::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+  /* Empty state */
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: 12px;
+    color: var(--text3);
+    font-size: 12px;
+    text-align: center;
+  }
+  .empty-icon { font-size: 32px; opacity: 0.4; }
+
+  /* Entity detail */
+  .detail-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 15px;
+    font-weight: 600;
+    color: #fff;
+    margin-bottom: 4px;
+    word-break: break-word;
+  }
+  .detail-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    margin-bottom: 12px;
+  }
+
+  .section-title {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: var(--text3);
+    margin: 16px 0 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .section-title::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  .claim-card {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    transition: border-color 0.15s;
+    cursor: pointer;
+  }
+  .claim-card:hover { border-color: var(--border2); }
+
+  .claim-type-tag {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--accent2);
+    margin-bottom: 5px;
+  }
+  .claim-value {
+    font-size: 11px;
+    color: var(--text);
+    line-height: 1.5;
+    margin-bottom: 6px;
+  }
+  .claim-footer {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .confidence-bar {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 10px;
+    color: var(--text3);
+  }
+  .conf-track {
+    width: 50px; height: 3px;
+    background: var(--border2);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .conf-fill {
+    height: 100%;
+    border-radius: 2px;
+    background: var(--green);
+  }
+
+  .evidence-excerpt {
+    background: var(--bg);
+    border-left: 3px solid var(--accent2);
+    padding: 8px 10px;
+    font-size: 10px;
+    color: var(--text2);
+    line-height: 1.6;
+    border-radius: 0 4px 4px 0;
+    margin-top: 8px;
+    font-style: italic;
+  }
+  .evidence-source {
+    font-size: 10px;
+    color: var(--text3);
+    margin-top: 5px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .evidence-source a {
+    color: var(--accent);
+    text-decoration: none;
+  }
+  .evidence-source a:hover { text-decoration: underline; }
+
+  /* Search results */
+  .result-card {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    transition: border-color 0.15s;
+  }
+  .result-card:hover { border-color: var(--border2); }
+  .result-score {
+    font-size: 10px;
+    color: var(--text3);
+    float: right;
+    font-weight: 500;
+  }
+  .result-title {
+    font-size: 12px;
+    color: var(--text);
+    margin-bottom: 5px;
+    line-height: 1.4;
+  }
+  .result-summary {
+    font-size: 10px;
+    color: var(--text2);
+    line-height: 1.5;
+    margin-bottom: 6px;
+  }
+  .result-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .tag {
+    font-size: 9px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: var(--bg2);
+    border: 1px solid var(--border2);
+    color: var(--text3);
+  }
+  .tag.open   { border-color: var(--green); color: var(--green); }
+  .tag.closed { border-color: var(--text3); }
+
+  /* Merge / conflict logs */
+  .log-item {
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    margin-bottom: 6px;
+    font-size: 10px;
+  }
+  .log-action {
+    color: var(--yellow);
+    margin-bottom: 3px;
+    font-weight: 500;
+  }
+  .log-detail { color: var(--text3); }
+
+  /* Loading */
+  .loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 24px;
+    color: var(--text3);
+    font-size: 11px;
+  }
+  .spinner {
+    width: 16px; height: 16px;
+    border: 2px solid var(--border2);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Tooltip */
+  .tooltip {
+    position: fixed;
+    background: var(--bg2);
+    border: 1px solid var(--border2);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 11px;
+    color: var(--text);
+    pointer-events: none;
+    z-index: 9999;
+    max-width: 220px;
+    display: none;
+  }
+  .tooltip.show { display: block; }
+
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header>
+  <div class="logo">
+    <div class="logo-dot"></div>
+    layer<span>10</span>
+  </div>
+  <div class="search-bar">
+    <span class="search-icon">⌕</span>
+    <input type="text" id="search-input" placeholder="Ask anything about vscode issues…" />
+  </div>
+  <div class="header-stats">
+    <div class="stat-pill issues"><div class="dot"></div><span id="stat-issues">— issues</span></div>
+    <div class="stat-pill persons"><div class="dot"></div><span id="stat-persons">— persons</span></div>
+    <div class="stat-pill comps"><div class="dot"></div><span id="stat-comps">— components</span></div>
+    <div class="stat-pill claims"><div class="dot"></div><span id="stat-claims">— claims</span></div>
+  </div>
+</header>
+
+<!-- SIDEBAR -->
+<aside>
+  <div class="panel-header">Explorer</div>
+
+  <div class="filter-group">
+    <div class="filter-label">Node Types</div>
+    <div class="filter-buttons">
+      <button class="filter-btn active-issue" data-type="issue" onclick="toggleFilter('issue', this)">Issues</button>
+      <button class="filter-btn active-person" data-type="person" onclick="toggleFilter('person', this)">People</button>
+      <button class="filter-btn active-component" data-type="component" onclick="toggleFilter('component', this)">Components</button>
+      <button class="filter-btn active-claim" data-type="claim" onclick="toggleFilter('claim', this)">Claims</button>
+    </div>
+    <div class="slider-row" style="margin-top:12px">
+      <label>Min. confidence</label>
+      <input type="range" id="conf-slider" min="0" max="1" step="0.05" value="0.5"
+             oninput="document.getElementById('conf-val').textContent=this.value;reloadGraph()">
+      <span class="slider-val" id="conf-val">0.5</span>
+    </div>
+  </div>
+
+  <div class="panel-header" style="border-top:1px solid var(--border)">Entities</div>
+  <div class="entity-list" id="entity-list">
+    <div class="loading"><div class="spinner"></div>Loading…</div>
+  </div>
+</aside>
+
+<!-- GRAPH -->
+<div id="graph-area">
+  <svg id="graph-canvas"></svg>
+  <div class="graph-controls">
+    <button class="ctrl-btn" onclick="zoomIn()" title="Zoom in">+</button>
+    <button class="ctrl-btn" onclick="zoomOut()" title="Zoom out">−</button>
+    <button class="ctrl-btn" onclick="resetZoom()" title="Reset">⊙</button>
+  </div>
+  <div class="graph-overlay">
+    <div class="legend-item"><div class="legend-dot" style="background:var(--c-issue)"></div>Issue</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--c-person)"></div>Person</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--c-component)"></div>Component</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--c-claim)"></div>Claim</div>
+  </div>
+</div>
+
+<!-- DETAIL PANEL -->
+<div id="detail-panel">
+  <div class="detail-tabs">
+    <div class="tab active" onclick="switchTab('entity', this)">Entity</div>
+    <div class="tab" onclick="switchTab('search', this)">Search</div>
+    <div class="tab" onclick="switchTab('merges', this)">Merges</div>
+  </div>
+  <div class="detail-content" id="detail-content">
+    <div class="empty-state">
+      <div class="empty-icon">⬡</div>
+      <div>Click a node to explore its claims and evidence</div>
+    </div>
+  </div>
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+const API = 'http://localhost:5000';
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let graphData = { nodes: [], edges: [] };
+let activeFilters = new Set(['issue', 'person', 'component', 'claim']);
+let selectedNodeId = null;
+let simulation = null;
+let svg = null, g = null, zoom = null;
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', async () => {
+  await loadStats();
+  await loadGraph();
+  setupSearch();
+});
+
+async function loadStats() {
+  try {
+    const r = await fetch(`${API}/api/stats`);
+    const s = await r.json();
+    document.getElementById('stat-issues').textContent    = `${s.Issue||0} issues`;
+    document.getElementById('stat-persons').textContent   = `${s.Person||0} persons`;
+    document.getElementById('stat-comps').textContent     = `${s.Component||0} components`;
+    document.getElementById('stat-claims').textContent    = `${s.Claim||0} claims`;
+  } catch(e) {
+    console.warn('Stats unavailable (API offline?)', e);
+  }
+}
+
+// ── Graph Loading ─────────────────────────────────────────────────────────────
+async function loadGraph() {
+  const conf = document.getElementById('conf-slider').value;
+  try {
+    const r = await fetch(`${API}/api/graph?limit=120&min_confidence=${conf}`);
+    const data = await r.json();
+    graphData = data;
+    renderEntityList(data.nodes);
+    renderGraph(data.nodes, data.edges);
+  } catch(e) {
+    // Use demo data when API offline
+    const demo = makeDemoData();
+    graphData = demo;
+    renderEntityList(demo.nodes);
+    renderGraph(demo.nodes, demo.edges);
+  }
+}
+
+function reloadGraph() { loadGraph(); }
+
+function makeDemoData() {
+  const nodes = [
+    {id:'issue:1', type:'Issue', title:'Terminal flickers on resize', state:'open', number:1},
+    {id:'issue:2', type:'Issue', title:'Extension host crash on load', state:'closed', number:2},
+    {id:'issue:3', type:'Issue', title:'Git diff view broken', state:'open', number:3},
+    {id:'issue:4', type:'Issue', title:'Debugger hangs on breakpoint', state:'open', number:4},
+    {id:'issue:5', type:'Issue', title:'Search result highlight missing', state:'closed', number:5},
+    {id:'github:aeschli', type:'Person', login:'aeschli'},
+    {id:'github:bpasero', type:'Person', login:'bpasero'},
+    {id:'github:joaomoreno', type:'Person', login:'joaomoreno'},
+    {id:'component:terminal', type:'Component', name:'terminal'},
+    {id:'component:extensions', type:'Component', name:'extensions'},
+    {id:'component:git', type:'Component', name:'git'},
+    {id:'component:debugger', type:'Component', name:'debugger'},
+    {id:'claim:a1', type:'Claim', claim_type:'BUG_REPORTED', value:'Terminal flickers when window resizes', confidence:0.9},
+    {id:'claim:a2', type:'Claim', claim_type:'ISSUE_AFFECTS_COMPONENT', value:'affects terminal rendering', confidence:0.85},
+    {id:'claim:a3', type:'Claim', claim_type:'DECISION_MADE', value:'Will fix in next minor release', confidence:0.75},
+  ];
+  const edges = [
+    {source:'github:bpasero', target:'issue:1', type:'AUTHORED'},
+    {source:'github:aeschli', target:'issue:2', type:'AUTHORED'},
+    {source:'github:joaomoreno', target:'issue:3', type:'AUTHORED'},
+    {source:'claim:a1', target:'issue:1', type:'HAS_SUBJECT'},
+    {source:'claim:a2', target:'component:terminal', type:'HAS_OBJECT'},
+    {source:'claim:a3', target:'issue:2', type:'HAS_SUBJECT'},
+    {source:'issue:1', target:'component:terminal', type:'HAS_LABEL'},
+    {source:'issue:3', target:'component:git', type:'HAS_LABEL'},
+    {source:'issue:4', target:'component:debugger', type:'HAS_LABEL'},
+  ];
+  return {nodes, edges};
+}
+
+// ── D3 Graph ──────────────────────────────────────────────────────────────────
+const NODE_COLOR = {
+  Issue: 'var(--c-issue)',
+  Person: 'var(--c-person)',
+  Component: 'var(--c-component)',
+  Claim: 'var(--c-claim)',
+};
+const NODE_RADIUS = {
+  Issue: 8, Person: 7, Component: 9, Claim: 5,
+};
+
+function renderGraph(allNodes, allEdges) {
+  const el = document.getElementById('graph-canvas');
+  el.innerHTML = '';
+
+  const W = el.clientWidth, H = el.clientHeight;
+
+  svg = d3.select('#graph-canvas')
+    .attr('width', W).attr('height', H);
+
+  zoom = d3.zoom()
+    .scaleExtent([0.2, 4])
+    .on('zoom', e => g.attr('transform', e.transform));
+
+  svg.call(zoom);
+
+  g = svg.append('g');
+
+  // Filter nodes by active types
+  const visibleTypes = new Map([
+    ['Issue','issue'],['Person','person'],
+    ['Component','component'],['Claim','claim'],
+  ]);
+  const nodes = allNodes.filter(n => activeFilters.has(visibleTypes.get(n.type) || n.type.toLowerCase()));
+  const nodeIds = new Set(nodes.map(n => n.id));
+  const edges = allEdges.filter(e => nodeIds.has(e.source) && nodeIds.has(e.target));
+
+  // Build simulation
+  simulation = d3.forceSimulation(nodes)
+    .force('link', d3.forceLink(edges).id(d => d.id).distance(60).strength(0.4))
+    .force('charge', d3.forceManyBody().strength(-200))
+    .force('center', d3.forceCenter(W/2, H/2))
+    .force('collision', d3.forceCollide().radius(d => NODE_RADIUS[d.type]+6));
+
+  // Edges
+  const link = g.append('g').selectAll('line')
+    .data(edges).join('line')
+    .attr('stroke', '#1e2535')
+    .attr('stroke-width', 1)
+    .attr('stroke-opacity', 0.7);
+
+  // Nodes
+  const node = g.append('g').selectAll('g')
+    .data(nodes).join('g')
+    .attr('cursor', 'pointer')
+    .call(d3.drag()
+      .on('start', (e, d) => { if (!e.active) simulation.alphaTarget(0.3).restart(); d.fx=d.x; d.fy=d.y; })
+      .on('drag',  (e, d) => { d.fx = e.x; d.fy = e.y; })
+      .on('end',   (e, d) => { if (!e.active) simulation.alphaTarget(0); d.fx=null; d.fy=null; })
+    )
+    .on('click', (e, d) => { e.stopPropagation(); selectNode(d); })
+    .on('mouseover', (e, d) => showTooltip(e, d))
+    .on('mousemove', (e) => moveTooltip(e))
+    .on('mouseout', () => hideTooltip());
+
+  node.append('circle')
+    .attr('r', d => NODE_RADIUS[d.type] || 6)
+    .attr('fill', d => NODE_COLOR[d.type] || '#666')
+    .attr('fill-opacity', 0.85)
+    .attr('stroke', d => NODE_COLOR[d.type] || '#666')
+    .attr('stroke-width', 1.5)
+    .attr('stroke-opacity', 0.4);
+
+  node.append('text')
+    .attr('dy', d => -(NODE_RADIUS[d.type]||6) - 4)
+    .attr('text-anchor', 'middle')
+    .attr('font-size', '9px')
+    .attr('fill', 'var(--text2)')
+    .attr('pointer-events', 'none')
+    .text(d => {
+      const label = d.title || d.login || d.name || d.value || d.id;
+      return label.length > 22 ? label.slice(0,20)+'…' : label;
+    });
+
+  simulation.on('tick', () => {
+    link.attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+        .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+    node.attr('transform', d => `translate(${d.x},${d.y})`);
+  });
+
+  svg.on('click', () => {
+    selectedNodeId = null;
+    node.selectAll('circle').attr('stroke-width', 1.5).attr('stroke-opacity', 0.4);
+  });
+}
+
+function selectNode(d) {
+  selectedNodeId = d.id;
+  // Highlight
+  d3.select('#graph-canvas').selectAll('circle')
+    .attr('stroke-width', n => n.id === d.id ? 3 : 1.5)
+    .attr('stroke-opacity', n => n.id === d.id ? 1 : 0.4);
+
+  // Highlight in sidebar
+  document.querySelectorAll('.entity-item').forEach(el => {
+    el.classList.toggle('selected', el.dataset.id === d.id);
+  });
+
+  showEntityDetail(d);
+}
+
+// ── Tooltip ───────────────────────────────────────────────────────────────────
+function showTooltip(e, d) {
+  const t = document.getElementById('tooltip');
+  t.innerHTML = `<strong>${d.type}</strong><br>${d.title||d.login||d.name||d.value||d.id}`;
+  t.classList.add('show');
+  moveTooltip(e);
+}
+function moveTooltip(e) {
+  const t = document.getElementById('tooltip');
+  t.style.left = (e.clientX+14)+'px';
+  t.style.top  = (e.clientY-10)+'px';
+}
+function hideTooltip() {
+  document.getElementById('tooltip').classList.remove('show');
+}
+
+// ── Zoom controls ─────────────────────────────────────────────────────────────
+function zoomIn()    { svg.transition().call(zoom.scaleBy, 1.4); }
+function zoomOut()   { svg.transition().call(zoom.scaleBy, 0.7); }
+function resetZoom() { svg.transition().call(zoom.transform, d3.zoomIdentity); }
+
+// ── Sidebar entity list ───────────────────────────────────────────────────────
+function renderEntityList(nodes) {
+  const list = document.getElementById('entity-list');
+  const typeOrder = { Issue: 0, Component: 1, Person: 2, Claim: 3 };
+  const sorted = [...nodes].sort((a,b) => (typeOrder[a.type]||9)-(typeOrder[b.type]||9));
+
+  list.innerHTML = sorted.map(n => {
+    const color = NODE_COLOR[n.type] || '#666';
+    const label = n.title || n.login || n.name || n.value || n.id;
+    const meta  = n.type === 'Issue'
+      ? `#${n.number} · ${n.state||''}`
+      : n.type === 'Claim'
+      ? `${n.claim_type||''} · ${Math.round((n.confidence||0)*100)}%`
+      : n.type === 'Component'
+      ? (n.aliases?.length ? n.aliases.slice(0,2).join(', ') : '')
+      : '';
+    return `
+      <div class="entity-item${selectedNodeId===n.id?' selected':''}"
+           data-id="${n.id}" onclick="sidebarSelect(${JSON.stringify(n).replace(/"/g,'&quot;')})">
+        <div class="entity-type-dot" style="background:${color}"></div>
+        <div>
+          <div class="entity-name">${label.length>40?label.slice(0,38)+'…':label}</div>
+          ${meta ? `<div class="entity-meta">${meta}</div>` : ''}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function sidebarSelect(node) {
+  selectedNodeId = node.id;
+  document.querySelectorAll('.entity-item').forEach(el => {
+    el.classList.toggle('selected', el.dataset.id === node.id);
+  });
+  d3.select('#graph-canvas').selectAll('circle')
+    .attr('stroke-width', n => n.id === node.id ? 3 : 1.5)
+    .attr('stroke-opacity', n => n.id === node.id ? 1 : 0.4);
+  showEntityDetail(node);
+}
+
+// ── Filter toggle ─────────────────────────────────────────────────────────────
+function toggleFilter(type, btn) {
+  if (activeFilters.has(type)) {
+    activeFilters.delete(type);
+    btn.className = 'filter-btn';
+  } else {
+    activeFilters.add(type);
+    btn.className = `filter-btn active-${type}`;
+  }
+  if (graphData.nodes.length) renderGraph(graphData.nodes, graphData.edges);
+}
+
+// ── Tab switching ─────────────────────────────────────────────────────────────
+let currentTab = 'entity';
+function switchTab(tab, el) {
+  currentTab = tab;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+
+  const content = document.getElementById('detail-content');
+
+  if (tab === 'entity') {
+    if (selectedNodeId) {
+      const node = graphData.nodes.find(n => n.id === selectedNodeId);
+      if (node) showEntityDetail(node);
+      else content.innerHTML = `<div class="empty-state"><div class="empty-icon">⬡</div><div>Click a node to explore</div></div>`;
+    } else {
+      content.innerHTML = `<div class="empty-state"><div class="empty-icon">⬡</div><div>Click a node to explore its claims and evidence</div></div>`;
+    }
+  } else if (tab === 'search') {
+    content.innerHTML = `<div class="empty-state"><div class="empty-icon">⌕</div><div>Type in the search bar above to find grounded results</div></div>`;
+  } else if (tab === 'merges') {
+    showMergeLog();
+  }
+}
+
+// ── Entity Detail ─────────────────────────────────────────────────────────────
+async function showEntityDetail(node) {
+  currentTab = 'entity';
+  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', i===0));
+
+  const content = document.getElementById('detail-content');
+  content.innerHTML = `<div class="loading"><div class="spinner"></div>Loading…</div>`;
+
+  const color = NODE_COLOR[node.type] || '#666';
+  const label = node.title || node.login || node.name || node.value || node.id;
+
+  let claimsHtml = '';
+
+  try {
+    let claims = [];
+    if (node.type === 'Issue') {
+      const r = await fetch(`${API}/api/issue/${node.number}`);
+      if (r.ok) {
+        const d = await r.json();
+        claims = d.claims || [];
+      }
+    } else {
+      const r = await fetch(`${API}/api/entity/${encodeURIComponent(node.id)}`);
+      if (r.ok) {
+        const d = await r.json();
+        claims = d.claims || [];
+      }
+    }
+
+    claimsHtml = claims.length
+      ? claims.map(c => renderClaimCard(c)).join('')
+      : `<div style="color:var(--text3);font-size:11px;padding:8px 0">No claims found.</div>`;
+  } catch(e) {
+    // Demo fallback
+    claimsHtml = renderDemoClaims(node);
+  }
+
+  const stateTag = node.state
+    ? `<span class="tag ${node.state}">${node.state}</span>`
+    : '';
+  const urlLink = node.url
+    ? `<a href="${node.url}" target="_blank" style="font-size:10px;color:var(--accent);text-decoration:none">↗ View on GitHub</a>`
+    : '';
+
+  content.innerHTML = `
+    <div class="detail-title">${label}</div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+      <span class="detail-badge" style="background:${color}22;border:1px solid ${color}44;color:${color}">
+        <span style="width:6px;height:6px;background:${color};border-radius:50%;display:inline-block"></span>
+        ${node.type}
+      </span>
+      ${stateTag}
+      ${urlLink}
+    </div>
+
+    ${node.summary ? `
+      <div style="font-size:11px;color:var(--text2);line-height:1.6;background:var(--bg3);
+                  border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:4px">
+        ${node.summary}
+      </div>` : ''}
+
+    ${node.body_excerpt ? `
+      <div style="font-size:10px;color:var(--text3);line-height:1.5;margin-bottom:4px;
+                  font-style:italic;max-height:80px;overflow:hidden">
+        ${node.body_excerpt.slice(0,300)}…
+      </div>` : ''}
+
+    <div class="section-title">Claims & Evidence</div>
+    ${claimsHtml}
+  `;
+}
+
+function renderClaimCard(c) {
+  const isSuperseded = c.superseded_by || c.superseded_by_id;
+  const confPct = Math.round((c.confidence||0.7)*100);
+  const evItems = (c.evidence||[]).filter(e=>e.excerpt).slice(0,2).map(e => `
+    <div class="evidence-excerpt">${e.excerpt}</div>
+    <div class="evidence-source">
+      📎 ${e.source_id||''}
+      ${e.url ? `· <a href="${e.url}" target="_blank">source ↗</a>` : ''}
+      ${e.timestamp ? `· ${e.timestamp.slice(0,10)}` : ''}
+    </div>
+  `).join('');
+
+  return `
+    <div class="claim-card" style="${isSuperseded?'opacity:0.5':''}">
+      <div class="claim-type-tag">${c.claim_type||c.type||''} ${isSuperseded?'· SUPERSEDED':''}</div>
+      <div class="claim-value">${c.value||c.subject_id||''}</div>
+      <div class="claim-footer">
+        <div class="confidence-bar">
+          <div class="conf-track"><div class="conf-fill" style="width:${confPct}%;background:${confPct>80?'var(--green)':confPct>60?'var(--yellow)':'var(--red)'}"></div></div>
+          ${confPct}%
+        </div>
+        ${c.valid_from?`<span class="tag">${c.valid_from.slice(0,10)}</span>`:''}
+        ${c.valid_until?`<span class="tag">until ${c.valid_until.slice(0,10)}</span>`:''}
+      </div>
+      ${evItems}
+    </div>`;
+}
+
+function renderDemoClaims(node) {
+  const demos = {
+    Issue: [{claim_type:'BUG_REPORTED', value:'Reproducible bug in this issue', confidence:0.9,
+             evidence:[{excerpt:'I can reproduce this consistently on macOS 14…', url:'#', timestamp:'2024-01-15T00:00:00Z', source_id:'issue:demo'}]}],
+    Component: [{claim_type:'ISSUE_AFFECTS_COMPONENT', value:'Multiple issues affect this component', confidence:0.85, evidence:[]}],
+    Person: [{claim_type:'PERSON_OWNS_COMPONENT', value:'Active contributor on this component', confidence:0.75, evidence:[]}],
+    Claim: [],
+  };
+  const claims = demos[node.type] || [];
+  return claims.map(renderClaimCard).join('') || `<div style="color:var(--text3);font-size:11px">No claims for this node.</div>`;
+}
+
+// ── Search ────────────────────────────────────────────────────────────────────
+function setupSearch() {
+  const input = document.getElementById('search-input');
+  let debounce;
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      clearTimeout(debounce);
+      runSearch(input.value.trim());
+    }
+  });
+  input.addEventListener('input', () => {
+    clearTimeout(debounce);
+    debounce = setTimeout(() => {
+      if (input.value.length > 3) runSearch(input.value.trim());
+    }, 600);
+  });
+}
+
+async function runSearch(q) {
+  if (!q) return;
+  switchTab('search', document.querySelectorAll('.tab')[1]);
+
+  const content = document.getElementById('detail-content');
+  content.innerHTML = `<div class="loading"><div class="spinner"></div>Searching…</div>`;
+
+  try {
+    const r = await fetch(`${API}/api/search?q=${encodeURIComponent(q)}&k=8`);
+    if (!r.ok) throw new Error('API error');
+    const data = await r.json();
+    renderSearchResults(q, data);
+  } catch(e) {
+    content.innerHTML = `
+      <div style="padding:12px">
+        <div style="font-size:11px;color:var(--text2);margin-bottom:12px">
+          Demo results for: <strong>"${q}"</strong>
+        </div>
+        ${renderDemoSearchResults()}
+      </div>`;
+  }
+}
+
+function renderSearchResults(q, data) {
+  const content = document.getElementById('detail-content');
+  const results = data.ranked_results || [];
+
+  content.innerHTML = `
+    <div style="font-size:10px;color:var(--text3);margin-bottom:12px">
+      ${results.length} results for <strong style="color:var(--text)">"${q}"</strong>
+    </div>
+    ${results.map((r,i) => `
+      <div class="result-card" onclick="selectResultNode('${r.id}')">
+        <span class="result-score">${(r.score*100).toFixed(0)}%</span>
+        <div class="result-title">${r.title||r.value||r.id}</div>
+        ${r.summary ? `<div class="result-summary">${r.summary.slice(0,120)}…</div>` : ''}
+        ${r.body_excerpt ? `<div class="result-summary">${r.body_excerpt.slice(0,100)}…</div>` : ''}
+        <div class="result-meta">
+          <span class="tag">${r.type}</span>
+          ${r.state ? `<span class="tag ${r.state}">${r.state}</span>` : ''}
+          ${(r.labels||[]).slice(0,2).map(l=>`<span class="tag">${l}</span>`).join('')}
+          ${r.url ? `<a href="${r.url}" target="_blank" style="font-size:10px;color:var(--accent);text-decoration:none">[${i+1}] ↗</a>` : ''}
+        </div>
+        ${(r.evidence_excerpts||[]).slice(0,1).map(ex=>
+          ex ? `<div class="evidence-excerpt">${ex.slice(0,150)}</div>` : ''
+        ).join('')}
+      </div>
+    `).join('')}
+    ${data.citations?.length ? `
+      <div class="section-title">Citations</div>
+      ${data.citations.map(c=>`
+        <div style="font-size:10px;color:var(--text3);margin-bottom:4px">
+          ${c.ref} <a href="${c.url}" target="_blank" style="color:var(--accent)">${c.title?.slice(0,60)||c.id}</a>
+        </div>`).join('')}
+    ` : ''}
+  `;
+}
+
+function renderDemoSearchResults() {
+  return ['Terminal flickers on resize', 'Extension host crash', 'Git diff view broken']
+    .map((t,i) => `
+      <div class="result-card">
+        <span class="result-score">${90-i*12}%</span>
+        <div class="result-title">${t}</div>
+        <div class="result-meta">
+          <span class="tag">Issue</span>
+          <span class="tag open">open</span>
+        </div>
+      </div>`).join('');
+}
+
+function selectResultNode(id) {
+  const node = graphData.nodes.find(n => n.id === id);
+  if (node) sidebarSelect(node);
+}
+
+// ── Merge Log ─────────────────────────────────────────────────────────────────
+async function showMergeLog() {
+  const content = document.getElementById('detail-content');
+  content.innerHTML = `<div class="loading"><div class="spinner"></div>Loading merge log…</div>`;
+
+  try {
+    const [merges, conflicts, dupes] = await Promise.all([
+      fetch(`${API}/api/merges`).then(r=>r.json()),
+      fetch(`${API}/api/conflicts`).then(r=>r.json()),
+      fetch(`${API}/api/duplicates`).then(r=>r.json()),
+    ]);
+
+    const dupeList = Object.entries(dupes).map(([dup, can]) =>
+      `<div class="log-item">
+        <div class="log-action">DUPLICATE_DETECTED</div>
+        <div class="log-detail">${dup} → ${can}</div>
+       </div>`).join('');
+
+    const conflictList = (conflicts||[]).map(c =>
+      `<div class="log-item">
+        <div class="log-action" style="color:var(--red)">CONFLICT: ${c.key}</div>
+        <div class="log-detail">Claims: ${c.claims?.join(', ')}</div>
+        <div class="log-detail">Values: ${c.values?.join(' | ')}</div>
+       </div>`).join('');
+
+    const mergeList = (merges||[]).slice(0,50).map(m =>
+      `<div class="log-item">
+        <div class="log-action">${m.action}</div>
+        <div class="log-detail">${JSON.stringify(m).slice(0,120)}</div>
+       </div>`).join('');
+
+    content.innerHTML = `
+      <div class="section-title">Duplicate Issues (${Object.keys(dupes).length})</div>
+      ${dupeList || '<div style="color:var(--text3);font-size:11px">None detected.</div>'}
+      <div class="section-title">Conflicts (${conflicts?.length||0})</div>
+      ${conflictList || '<div style="color:var(--text3);font-size:11px">No conflicts.</div>'}
+      <div class="section-title">Merge Events (${merges?.length||0})</div>
+      ${mergeList || '<div style="color:var(--text3);font-size:11px">No merge events.</div>'}
+    `;
+  } catch(e) {
+    content.innerHTML = `<div style="color:var(--text3);font-size:11px;padding:12px">
+      Merge log unavailable (start the API server to view live data).
+    </div>`;
+  }
+}
+</script>
+</body>
+</html>
